@@ -1,0 +1,17 @@
+# Node modules and build artifacts
+node_modules/
+dist/
+build/
+
+# Environment and system files
+.env
+.env.*
+*.log
+npm-debug.log*
+package-lock.json
+
+# Editor directories and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

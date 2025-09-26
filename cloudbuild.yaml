@@ -1,0 +1,68 @@
+substitutions:
+  # Name of the bucket where the built PWA will be deployed.  Update this
+  # value when configuring your Cloud Build trigger.
+  _FRONTEND_BUCKET: "spicy-chips-frontend"
+
+# This Cloud Build pipeline builds and deploys both the API and the front end.
+# It uses Docker to build the API into a container, deploys it to Cloud Run,
+# then builds the React app and synchronizes the compiled assets to a Cloud
+# Storage bucket.  Customize the trigger in the Cloud Console to run this
+# pipeline on pushes to the desired branch.
+steps:
+  # Install Node dependencies for the API
+  - name: 'gcr.io/cloud-builders/npm'
+    dir: 'api'
+    args: ['install']
+
+  # Build the API container and tag it with the commit SHA
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/spicy-chips-api:$SHORT_SHA'
+      - '-f'
+      - 'api/Dockerfile'
+      - '.'
+
+  # Push the API image to Artifact Registry / Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/spicy-chips-api:$SHORT_SHA']
+
+  # Deploy the API to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy spicy-chips-api \
+          --image gcr.io/$PROJECT_ID/spicy-chips-api:$SHORT_SHA \
+          --region us-east1 \
+          --platform managed \
+          --quiet \
+          --allow-unauthenticated \
+          --set-env-vars ALLOWED_ORIGIN=https://spicy-chips.web.app
+
+  # Build the web application
+  - name: 'gcr.io/cloud-builders/npm'
+    dir: 'web'
+    args: ['install']
+  - name: 'gcr.io/cloud-builders/npm'
+    dir: 'web'
+    args: ['run', 'build']
+
+  # Deploy the web assets to Cloud Storage bucket.  This step uses gsutil to
+  # mirror the build output directory (`dist`) into your frontend bucket.  It
+  # deletes files in the bucket that are not present in the build output to
+  # ensure the bucket contents match the latest build.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    dir: 'web'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gsutil -m rsync -d -r dist gs://${_FRONTEND_BUCKET}
+
+# Images built by Cloud Build are stored by default in the builder's cache.
+# Declaring them here ensures they are retained for the next step.
+images:
+  - 'gcr.io/$PROJECT_ID/spicy-chips-api:$SHORT_SHA'
