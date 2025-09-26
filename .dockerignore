@@ -1,0 +1,30 @@
+# Prevent large or unnecessary files from being sent to the Docker build context
+.git
+.gitignore
+
+# Dependency directories
+node_modules
+**/node_modules
+
+# Local environment and logs
+.env
+.env.*
+*.log
+npm-debug.log*
+yarn-error.log
+pnpm-debug.log
+
+# Build outputs
+web/dist
+web/.vite
+api/dist
+coverage
+
+# Local uploads and caches
+api/uploads
+
+# Misc editor cruft
+.vscode
+.idea
+.DS_Store
+Thumbs.db

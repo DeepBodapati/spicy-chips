@@ -1,57 +1,142 @@
 import React, { useState } from 'react';
 
 /**
- * QuestionView renders different question formats based on `q.type`.  It calls
- * the provided `onSubmit` callback with a boolean indicating whether the
- * student’s answer is correct.  This demo implementation is intentionally
- * simple—you should expand it to support multi‑part answers, numeric keypad
- * input, and hints.
+ * QuestionView renders a single question and collects the learner's response.
+ * It normalizes the answer and forwards it to the parent via `onSubmit`, which
+ * may perform grading, feedback lookups, or navigation.
  */
 const QuestionView = ({ q, onSubmit }) => {
   const [value, setValue] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
 
-  const handleChange = (e) => {
-    setValue(e.target.value);
+  if (!q) {
+    return null;
+  }
+
+  const handleChange = (event) => {
+    setValue(event.target.value);
   };
 
-  const checkAnswer = () => {
+  const buildSubmission = () => {
+    const trimmed = value.trim();
+    const submission = {
+      raw: value,
+      text: value,
+    };
     let correct = false;
+
     if (q.type === 'numeric') {
-      correct = parseInt(value, 10) === q.answer.exact;
+      const parsed = Number(trimmed);
+      submission.numeric = Number.isFinite(parsed) ? parsed : undefined;
+      if (typeof q.answer?.exact === 'number' && Number.isFinite(parsed)) {
+        correct = parsed === q.answer.exact;
+      }
     } else if (q.type === 'free_text') {
-      // Extract the first number from free text and compare to the accepted range
-      const match = value.match(/\d+/);
+      const match = trimmed.match(/-?\d+(?:\.\d+)?/);
       if (match) {
-        const num = parseInt(match[0], 10);
-        const [low, high] = q.answer.range;
-        correct = num >= low && num <= high;
+        const parsed = Number(match[0]);
+        submission.numeric = Number.isFinite(parsed) ? parsed : undefined;
+        const [low, high] = q.answer?.range ?? [];
+        if (
+          Number.isFinite(parsed) &&
+          typeof low === 'number' &&
+          typeof high === 'number'
+        ) {
+          correct = parsed >= low && parsed <= high;
+        }
       }
     } else if (q.type === 'multi_part') {
-      // For multi‑part questions we accept comma‑separated values.  The demo
-      // compares the first and second parts to the expected answers.
-      const parts = value.split(',').map((s) => s.trim());
-      const expected = q.answer.parts;
-      const hundred = parseInt(parts[0], 10);
-      const thousand = parseInt(parts[1], 10);
-      correct =
-        hundred === expected.hundred &&
-        (expected.thousand === undefined || thousand === expected.thousand);
+      const expected = q.answer?.parts ?? {};
+      const keys = Object.keys(expected);
+      const parts = trimmed
+        .split(',')
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0);
+
+      const parsedParts = {};
+      let allMatch = keys.length > 0;
+
+      keys.forEach((key, index) => {
+        const expectedValue = expected[key];
+        const segment = parts[index];
+        if (segment === undefined) {
+          allMatch = false;
+          return;
+        }
+        if (typeof expectedValue === 'number') {
+          const parsed = Number(segment);
+          if (!Number.isFinite(parsed) || parsed !== expectedValue) {
+            allMatch = false;
+          }
+          if (Number.isFinite(parsed)) {
+            parsedParts[key] = parsed;
+          }
+        } else if (segment.toLowerCase() !== String(expectedValue).toLowerCase()) {
+          allMatch = false;
+        } else {
+          parsedParts[key] = segment;
+        }
+      });
+
+      submission.parts = parsedParts;
+      correct = allMatch;
+    } else {
+      // Fallback: compare trimmed strings.
+      const expected = String(q.answer?.exact ?? '').trim().toLowerCase();
+      correct = trimmed.toLowerCase() === expected;
     }
-    onSubmit(correct);
-    setValue('');
+
+    return { correct, submission };
+  };
+
+  const handleSubmit = async () => {
+    if (isSubmitting) {
+      return;
+    }
+
+    const { correct, submission } = buildSubmission();
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      await onSubmit({ correct, submission });
+      setValue('');
+    } catch (err) {
+      setSubmitError(err?.message || 'Unable to submit answer right now.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleSubmit();
+    }
   };
 
   return (
     <div>
-      <p>{q.prompt}</p>
-      <input
-        type="text"
-        value={value}
-        onChange={handleChange}
-        placeholder="Type your answer"
-        style={{ width: '100%', padding: '0.5rem', marginBottom: '0.5rem' }}
-      />
-      <button onClick={checkAnswer}>Submit</button>
+      <div className="sc-field">
+        <label htmlFor={`answer-${q.id}`}>Your answer</label>
+        <input
+          id={`answer-${q.id}`}
+          className="sc-input"
+          type="text"
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          placeholder="Type your response"
+          disabled={isSubmitting}
+        />
+      </div>
+      <div className="sc-controls">
+        <button className="sc-button sc-button--primary" onClick={handleSubmit} disabled={isSubmitting}>
+          {isSubmitting ? 'Checking...' : 'Submit'}
+        </button>
+      </div>
+      {submitError ? <p className="sc-error">{submitError}</p> : null}
     </div>
   );
 };

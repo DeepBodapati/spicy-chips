@@ -9,9 +9,15 @@ build/
 *.log
 npm-debug.log*
 package-lock.json
+.venv/*
 
 # Editor directories and OS files
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Project artifacts
+web/dist/
+web/.vite/
+api/uploads/

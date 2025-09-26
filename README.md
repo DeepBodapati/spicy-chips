@@ -1,90 +1,85 @@
 # Spicy Chips
 
-**Spicy&nbsp;Chips** is a progressive web application designed around the idea of short, game‑inspired practice sessions.  Upload a scanned worksheet, pick a session length and difficulty, and let the app generate bite‑sized problems tailored to the concepts on the page.  You can reuse the structure here as a jumping‑off point for your own custom tutoring tool.
+Spicy Chips is a React + Express playground for bite-sized practice sessions. Upload a worksheet, pick a vibe, and the app serves a stream of kid-friendly questions with instant feedback. The repo is optimized for rapid iteration—perfect for experimenting with OCR/LLM-backed tutoring flows.
 
-## Project layout
+## What’s inside
 
-This repository is split into separate modules for the web front end and the API backend.  You can extend or replace any part of this structure depending on your needs.
+- **Polished PWA front end** (`web/`): Vite + React with a playful Spicy Chips theme.
+- **Session workflow**: upload (with parent-provided grade) → OCR/vision-backed concept detection → options → confirmation → live session → recap with per-question feedback.
+- **In-browser state**: worksheet metadata, selections, questions, and responses stay client-side for now (no auth, no persistence).
+- **API playground** (`api/`): Express routes for uploads, concept/grade analysis (OpenAI vision + OCR), question generation, and feedback.
 
 ```text
 spicy-chips/
-├── web/       # React PWA (front end)
-├── api/       # Express server (backend)
-├── infra/     # Infrastructure and deployment notes
-└── .github/   # Sample CI/CD workflows for GitHub Actions
+├── web/       # React PWA
+├── api/       # Express API
+├── infra/     # Deployment notes
+└── .github/   # Sample CI/CD workflows
 ```
 
-### Front end (`web/`)
+## Quick start
 
-The `web` directory contains a simple React application built with [Vite](https://vitejs.dev/).  Pages are organized by concept:
+### Prerequisites
+- Node.js 18+
+- npm 9+
 
-| File/Component      | Purpose                                                        |
-|---------------------|----------------------------------------------------------------|
-| `UploadPage`        | Upload a PDF or image of a worksheet.                          |
-| `OptionsPage`       | Choose session length and difficulty.                          |
-| `ConfirmPage`       | Review selected options before starting.                        |
-| `SessionPage`       | Presents a sequence of questions and collects answers.          |
-| `QuestionView`      | Renders different question types (numeric, free text, multi-part). |
-| `SummaryPage`       | Shows results at the end of a session and offers to restart.    |
-
-To start the development server:
-
+### Run directly
 ```bash
+# Front end
 cd web
 npm install
-npm run dev
-```
+npm run dev  # http://localhost:5173
 
-This will start Vite on http://localhost:5173 and live‑reload your changes.
-
-### Back end (`api/`)
-
-The `api` folder contains a minimal Express server stub.  It exposes the following endpoints:
-
-- **`POST /analyze`** – Accepts a file URL or uploaded content and returns a list of inferred concepts (to be implemented).
-- **`POST /generate`** – Given a set of concepts and a difficulty level, returns JSON describing a set of questions.
-- **`POST /feedback`** – Returns hints and explanations based on the user's answer.
-- **`POST /sign-upload`** – Returns a signed URL for uploading a file to cloud storage.
-
-To run the API locally:
-
-```bash
-cd api
+# In a second terminal
+cd ../api
 npm install
-npm start
+npm start    # http://localhost:3001
 ```
 
-The server listens on port `3001` by default.  It uses CORS to allow requests from the PWA during development.
+### Docker workflow
+```bash
+docker compose build
+docker compose up
+```
+- Vite dev server: http://localhost:5173
+- Express API: http://localhost:3001
+- Uploads land in `api/uploads/` during local dev and are served from `/uploads/*`.
 
-### Infrastructure (`infra/`)
+## API snapshot
 
-Deployment instructions and sample configuration live under `infra/`.  The recommended pattern is to serve the static PWA from Firebase Hosting or a Google Cloud Storage bucket behind a CDN, and to deploy the API as a container to Cloud Run.  A short guide in `infra/README.md` outlines region and project settings, secret management, and sample GitHub Actions workflows.
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /sign-upload` | Issues a temporary upload target (local dev returns `http://localhost:3001/upload`). |
+| `POST /upload` | Accepts multipart uploads, saves to `api/uploads/`, returns a file URL. |
+| `POST /analyze` | Uses OCR + OpenAI vision/text to infer concepts, difficulty notes, question styles, and number ranges. |
+| `POST /generate` | Generates concept-aware question sets (mix of numeric, multi-part, and estimation prompts). |
+| `POST /feedback` | Returns upbeat hints per submission; currently heuristic-based. |
 
-### Next steps for Codex
+## OCR & vision prerequisites
+- The API uses [tesseract.js](https://github.com/naptha/tesseract.js) and [pdf-parse](https://www.npmjs.com/package/pdf-parse) for local extraction.
+- For richer concept detection, set `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`/`OPENAI_TEXT_MODEL`) so `/analyze` can call GPT-4o. Vision works best with images; PDFs fall back to text extraction + LLM reasoning.
 
-This codebase is deliberately lean—it is meant to be a starting point rather than a finished product.  You can build on it using Codex or ChatGPT by iterating on the following areas:
+## Local-only data policy
+For early iterations we intentionally keep session data in memory—no accounts, no persistence. When you’re ready to track mastery across sessions, plan a `/sessions` endpoint and storage (Firestore, Postgres, etc.).
 
-1. **OCR and concept extraction** – Wire up the `POST /analyze` handler to your OCR engine (e.g. Tesseract or a cloud OCR API) and send the extracted text to an LLM (such as GPT‑5) to identify concepts and number ranges.
-2. **Question generation** – In `POST /generate`, call the LLM with the selected concepts and difficulty to generate an array of question objects.  Each object should conform to a schema like the one described earlier in the conversation (type, prompt, answer, hints).
-3. **Feedback logic** – Implement `POST /feedback` to provide context‑aware hints and short explanations based on the student’s answers.  Consider multiple hint tiers and positive reinforcement when correct.
-4. **UI polish** – Apply your brand (“Spicy Chips”) by updating colors, fonts, and layout.  Add a timer bar, progress rings, and numeric keypad for input.  Use confetti or badges to celebrate streaks.  See the earlier design discussion for inspiration.
-5. **Persistent storage** – Implement the `sign-upload` endpoint to return a signed URL for uploading scanned worksheets to Google Cloud Storage.  Apply a lifecycle rule to auto‑delete uploads after a day.
-6. **Testing and linting** – Add unit tests for your API and React components.  Integrate ESLint and Prettier to maintain code quality.
+## Roadmap highlights
+1. Wire `/analyze` and `/generate` to real OCR/LLM pipelines.
+2. Add a kid-friendly timer / pacing UI and celebratory effects.
+3. Persist session summaries for concept mastery tracking once storage is chosen.
+4. Layer automated tests (API + React) and linting for CI.
 
-By using this structure, Codex can quickly navigate the code, understand the intent of each component, and implement the missing pieces.  Feel free to add more pages, routes, or API endpoints as your project grows.
+## Deployment pointers
+- `infra/README.md` covers recommended Google Cloud setup (Cloud Run + Firebase Hosting / Cloud Storage).
+- `cloudbuild.yaml` demonstrates a build/deploy pipeline; `.github/workflows/` includes GitHub Actions equivalents.
 
-### CI/CD with Cloud&nbsp;Build
+Happy shipping spicy practice sessions!
 
-If you prefer to run your build and deployment pipeline directly on Google Cloud rather than GitHub Actions, a sample `cloudbuild.yaml` is included at the root of this repository.  This pipeline does the following in order:
-
-1. Installs API dependencies and builds a Docker image for the API using `api/Dockerfile`.
-2. Pushes the image to Artifact Registry and deploys it to Cloud&nbsp;Run in `us-east1`.
-3. Installs web dependencies, builds the React app, and synchronizes the compiled assets (`web/dist`) to a Cloud Storage bucket specified by the `_FRONTEND_BUCKET` substitution.
-
-To enable continuous deployment:
-
-- **Create a Cloud&nbsp;Build trigger** in the Google Cloud console that watches pushes to your main branch.  Choose “Cloud Build configuration file” and set the filename to `cloudbuild.yaml`.
-- **Grant the Cloud&nbsp;Build service account permissions** to deploy to Cloud&nbsp;Run and write to your Cloud Storage bucket.
-- **Set the `_FRONTEND_BUCKET` substitution** to the name of your front‑end bucket (for example, `spicy-chips-frontend`).  Cloud Build will use `gsutil rsync` to keep the bucket in sync with your latest build.
-
-The provided GitHub Actions workflows and `cloudbuild.yaml` are complementary—use whichever system fits your workflow best.
+### Configure OpenAI
+Set the following before `docker compose up` (or export in your shell):
+```bash
+export OPENAI_API_KEY=sk-...
+# optional overrides
+export OPENAI_MODEL=gpt-4o-mini
+export OPENAI_TEXT_MODEL=gpt-4o-mini
+```
+The grade dropdown on the upload screen feeds context into the analyzer prompt.
