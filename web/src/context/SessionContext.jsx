@@ -4,6 +4,8 @@ const createInitialState = () => ({
   worksheet: null,
   grade: '',
   concepts: [],
+  selectedConcepts: [],
+  analysis: null,
   options: {
     duration: 5,
     difficulty: 'same',
@@ -17,12 +19,14 @@ const SessionContext = createContext(null);
 export const SessionProvider = ({ children }) => {
   const [state, setState] = useState(() => createInitialState());
 
-  const setWorksheet = useCallback((worksheet, concepts = []) => {
+  const setWorksheet = useCallback((worksheet, analysis = null, concepts = []) => {
     setState((prev) => ({
       ...prev,
       worksheet,
       grade: worksheet?.grade ?? prev.grade ?? '',
+      analysis,
       concepts,
+      selectedConcepts: concepts,
       questions: [],
       responses: [],
     }));
@@ -42,6 +46,13 @@ export const SessionProvider = ({ children }) => {
       ...prev,
       questions,
       responses: [],
+    }));
+  }, []);
+
+  const setSelectedConcepts = useCallback((concepts) => {
+    setState((prev) => ({
+      ...prev,
+      selectedConcepts: concepts,
     }));
   }, []);
 
@@ -68,6 +79,8 @@ export const SessionProvider = ({ children }) => {
     worksheet: state.worksheet,
     grade: state.grade,
     concepts: state.concepts,
+    selectedConcepts: state.selectedConcepts,
+    analysis: state.analysis,
     options: state.options,
     questions: state.questions,
     responses: state.responses,
@@ -75,9 +88,10 @@ export const SessionProvider = ({ children }) => {
     setGrade,
     setOptions,
     setQuestions,
+    setSelectedConcepts,
     addResponse,
     reset,
-  }), [state, setWorksheet, setGrade, setOptions, setQuestions, addResponse, reset]);
+  }), [state, setWorksheet, setGrade, setOptions, setQuestions, setSelectedConcepts, addResponse, reset]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 };

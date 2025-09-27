@@ -5,7 +5,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { generateQuestionSet } from './questionBank.js';
+import { generateQuestionsWithLLM } from './llmQuestionGenerator.js';
 import { analyzeWorksheet } from './conceptExtractor.js';
+import { evaluateDeterministic } from './answerEvaluator.js';
+import { gradeWithLLM } from './llmJudge.js';
 
 const app = express();
 
@@ -108,15 +111,43 @@ app.post('/analyze', async (req, res) => {
  *   questions: any[]
  * }
  */
-app.post('/generate', (req, res) => {
-  const { concepts = [], difficulty = 'same', count = 10, seed } = req.body || {};
+app.post('/generate', async (req, res) => {
+  const { concepts = [], difficulty = 'same', count = 10, seed, grade = '', analysis = null } = req.body || {};
+  const conceptList = Array.isArray(concepts) ? concepts : [];
 
   try {
-    const questions = generateQuestionSet({ concepts, difficulty, count, seed });
-    res.json({ questions });
+    let questions = [];
+    let source = 'heuristic';
+
+    if (process.env.OPENAI_API_KEY) {
+      const llmQuestions = await generateQuestionsWithLLM({
+        concepts: conceptList,
+        difficulty,
+        count,
+        grade,
+        analysis,
+      });
+
+      if (Array.isArray(llmQuestions) && llmQuestions.length) {
+        questions = llmQuestions;
+        source = 'llm';
+        console.info('Question generation: using LLM pathway');
+      }
+    }
+
+    if (!questions.length) {
+      questions = generateQuestionSet({ concepts: conceptList, difficulty, count, seed });
+      source = 'heuristic';
+      if (process.env.OPENAI_API_KEY) {
+        console.warn('Question generation: falling back to heuristic templates');
+      }
+    }
+
+    res.json({ questions, source });
   } catch (error) {
     console.error('Failed to generate questions', error);
-    res.status(400).json({ error: 'Unable to generate questions right now.' });
+    const fallbackQuestions = generateQuestionSet({ concepts: conceptList, difficulty, count, seed });
+    res.status(200).json({ questions: fallbackQuestions, source: 'heuristic', note: 'generate-fallback' });
   }
 });
 
@@ -136,50 +167,60 @@ app.post('/generate', (req, res) => {
  *   feedback: string
  * }
  */
-app.post('/feedback', (req, res) => {
-  const { question = {}, answer = {}, correct } = req.body || {};
-  const type = question.type || 'text';
+app.post('/feedback', async (req, res) => {
+  const { question = {}, submission = {} } = req.body || {};
 
-  let feedback = '';
+  try {
+    const deterministic = evaluateDeterministic({ question, submission });
 
-  if (correct) {
-    const positivePhrases = [
-      'Awesome work!',
-      'Great job!',
-      'Nice work! Keep that streak going.',
-    ];
-    feedback = `${positivePhrases[Math.floor(Math.random() * positivePhrases.length)]} Ready for the next one.`;
-  } else if (type === 'numeric' && typeof question.answer?.exact === 'number') {
-    const expected = question.answer.exact;
-    const provided = Number(answer.numeric);
+    if (deterministic.correct) {
+      const positivePhrases = [
+        'Awesome work!',
+        'Great job!',
+        'Nice work! Keep that streak going.',
+      ];
+      const feedback = `${positivePhrases[Math.floor(Math.random() * positivePhrases.length)]} Ready for the next one.`;
+      return res.json({ correct: true, feedback, source: 'deterministic' });
+    }
 
-    if (Number.isFinite(provided)) {
-      const diff = expected - provided;
-      if (Math.abs(diff) <= 2) {
-        feedback = `So close! The correct answer is ${expected}. Double-check your addition or subtraction.`;
-      } else {
-        feedback = `Remember to work carefully through each step. The correct answer is ${expected}.`;
+    const hints = Array.isArray(question.hints)
+      ? question.hints.filter((hint) => typeof hint === 'string' && hint.trim().length)
+      : [];
+
+    if (process.env.OPENAI_API_KEY) {
+      const llmResult = await gradeWithLLM({ question, submission: deterministic.normalized, deterministic });
+      if (llmResult) {
+        if (llmResult.correct) {
+          return res.json({ correct: true, feedback: llmResult.tip || 'Sweet! Nailed it.', source: 'llm' });
+        }
+        if (llmResult.tip) {
+          return res.json({ correct: false, feedback: llmResult.tip, source: 'llm' });
+        }
       }
-    } else {
-      feedback = `Try turning your response into a number—for example, ${expected}.`;
     }
-  } else if (type === 'free_text' && Array.isArray(question.answer?.range)) {
-    const [low, high] = question.answer.range;
-    feedback = `Aim for a value between ${low} and ${high}. Rounding before estimating often helps.`;
-  } else if (type === 'multi_part' && question.answer?.parts) {
-    const parts = question.answer.parts;
-    const keys = Object.keys(parts);
-    const missing = keys.filter((key) => answer?.parts?.[key] === undefined);
-    if (missing.length) {
-      feedback = `Make sure to fill out all parts (${missing.join(', ')}).`;
-    } else {
-      feedback = 'Compare each rounded value to see which place value changes.';
-    }
-  } else {
-    feedback = 'Take another look and break the problem into smaller steps.';
-  }
 
-  res.json({ feedback });
+    let fallbackFeedback = '';
+    if (hints.length) {
+      fallbackFeedback = hints[Math.floor(Math.random() * hints.length)];
+    } else if (question.type === 'numeric') {
+      fallbackFeedback = 'Stack the numbers and work carefully through each place value.';
+    } else if (question.type === 'free_text') {
+      fallbackFeedback = 'Round first, then estimate—getting close is the goal.';
+    } else if (question.type === 'multi_part' && question.answer?.parts) {
+      const keys = Object.keys(question.answer.parts || {});
+      const missing = keys.filter((key) => deterministic.normalized.parts[key] === undefined);
+      fallbackFeedback = missing.length
+        ? `Make sure to fill out all parts (${missing.join(', ')}).`
+        : 'Compare each rounded value to see which place value changes.';
+    } else {
+      fallbackFeedback = 'Take another look and break the problem into smaller steps.';
+    }
+
+    res.json({ correct: false, feedback: fallbackFeedback, source: 'heuristic' });
+  } catch (error) {
+    console.error('Feedback evaluation failed', error);
+    res.status(200).json({ correct: false, feedback: 'We had trouble checking this one. Try again!', source: 'error' });
+  }
 });
 
 /**

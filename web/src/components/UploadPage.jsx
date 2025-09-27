@@ -55,7 +55,19 @@ const UploadPage = () => {
         mimeType: uploadResult.mimeType || selectedFile.type,
       };
 
-      const { concepts = [] } = await analyzeWorksheet({ ...analyzePayload, grade });
+      const analysisResult = await analyzeWorksheet({ ...analyzePayload, grade });
+      const { concepts = [] } = analysisResult || {};
+      const rawConcepts = Array.isArray(analysisResult?.vision?.concepts) && analysisResult.vision.concepts.length
+        ? analysisResult.vision.concepts
+        : concepts;
+      const heuristicConcepts = Array.isArray(analysisResult?.heuristicConcepts) ? analysisResult.heuristicConcepts : [];
+      const uniqueConcepts = Array.from(new Set([...(rawConcepts || []), ...(concepts || [])])).filter(Boolean);
+      const suggestedConcepts = uniqueConcepts.slice(0, 3);
+      const conceptOptions = suggestedConcepts.length
+        ? suggestedConcepts
+        : heuristicConcepts.slice(0, 3).filter(Boolean);
+      const finalConcepts = conceptOptions.length ? conceptOptions : concepts.slice(0, 3);
+      const safeConcepts = finalConcepts.length ? finalConcepts : ['mixed practice'];
 
       setWorksheet({
         name: analyzePayload.originalName,
@@ -63,7 +75,7 @@ const UploadPage = () => {
         type: analyzePayload.mimeType,
         url: analyzePayload.url,
         grade,
-      }, concepts);
+      }, analysisResult, safeConcepts);
 
       navigate('/options');
     } catch (err) {

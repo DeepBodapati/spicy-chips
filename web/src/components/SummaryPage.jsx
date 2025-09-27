@@ -9,7 +9,7 @@ import { useSession } from '../context/SessionContext';
 const SummaryPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { worksheet, grade, concepts, options, questions, responses, reset } = useSession();
+  const { concepts, selectedConcepts, options, questions, responses, reset } = useSession();
   const score = location.state?.score ?? 0;
   const total = location.state?.total ?? (responses.length || questions.length);
 
@@ -43,35 +43,26 @@ const SummaryPage = () => {
           <h2>Session complete</h2>
           <p className="sc-lead">{score}{typeof total === 'number' && total > 0 ? ` / ${total}` : ''} correct. Nice hustle!</p>
 
-          {worksheet ? (
-            <div className="sc-session-stats">
-              <div>
-                <strong>Worksheet</strong>
-                <p style={{ margin: '4px 0 0', color: 'var(--sc-muted)' }}>{worksheet.name}</p>
-              </div>
-              <div>
-                <strong>Session settings</strong>
-                <p style={{ margin: '4px 0 0', color: 'var(--sc-muted)' }}>
-                  {options.duration} min | Difficulty: {options.difficulty}
-                </p>
-              </div>
-              <div>
-                <strong>Grade</strong>
-                <p style={{ margin: '4px 0 0', color: 'var(--sc-muted)' }}>{worksheet?.grade || grade || 'Not set'}</p>
-              </div>
-              <div>
-                <strong>Concepts</strong>
-                <div className="sc-chip-row">
-                  {concepts.length ?
-                    concepts.map((concept) => (
-                      <span key={concept} className="sc-chip">{concept}</span>
-                    )) : (
-                      <span className="sc-chip">general practice</span>
-                    )}
-                </div>
+          <div className="sc-session-stats">
+            <div>
+              <strong>Session settings</strong>
+              <p style={{ margin: '4px 0 0', color: 'var(--sc-muted)' }}>
+                {options.duration} min | Difficulty: {options.difficulty}
+              </p>
+            </div>
+            <div>
+              <strong>Concepts tested</strong>
+              <div className="sc-chip-row" style={{ marginTop: '6px' }}>
+                {(selectedConcepts.length ? selectedConcepts : concepts).length ? (
+                  (selectedConcepts.length ? selectedConcepts : concepts).map((concept) => (
+                    <span key={concept} className="sc-chip">{concept}</span>
+                  ))
+                ) : (
+                  <span className="sc-chip">mixed practice</span>
+                )}
               </div>
             </div>
-          ) : null}
+          </div>
 
           <div style={{ margin: '1.5rem 0 1rem' }}>
             <h3>Question review</h3>

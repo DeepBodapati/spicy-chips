@@ -22,7 +22,7 @@ const SessionPage = () => {
       return;
     }
     if (worksheet && questions.length === 0) {
-      navigate('/confirm');
+      navigate('/options');
     }
   }, [worksheet, questions.length, navigate]);
 
@@ -33,7 +33,7 @@ const SessionPage = () => {
     setFeedback(null);
   }, [questions]);
 
-  const handleSubmit = async ({ correct, submission }) => {
+  const handleSubmit = async ({ submission }) => {
     const question = questions[index];
     if (!question) {
       return;
@@ -46,15 +46,36 @@ const SessionPage = () => {
     try {
       const response = await requestFeedback({
         question,
-        answer: submission,
-        correct,
+        submission,
       });
-      message = response?.feedback || (correct ? 'Great job!' : 'Keep trying!');
+      const judgedCorrect = Boolean(response?.correct);
+      message = response?.feedback || (judgedCorrect ? 'Great job!' : 'Keep trying!');
       feedbackResult = {
         message,
-        correct,
+        correct: judgedCorrect,
         questionId: question.id,
+        source: response?.source || 'unknown',
       };
+      addResponse({
+        questionId: question.id,
+        question,
+        submission,
+        correct: judgedCorrect,
+        feedback: message,
+        feedbackError,
+        timestamp: Date.now(),
+      });
+
+      const nextScore = score + (judgedCorrect ? 1 : 0);
+      setScore(nextScore);
+
+      const isLastQuestion = index + 1 >= questions.length;
+      if (isLastQuestion) {
+        navigate('/summary', { state: { score: nextScore, total: questions.length } });
+        return;
+      }
+
+      setIndex((prev) => prev + 1);
     } catch (error) {
       feedbackError = true;
       message = error?.message || 'Feedback is unavailable right now.';
@@ -64,29 +85,18 @@ const SessionPage = () => {
         questionId: question.id,
         isError: true,
       };
+      addResponse({
+        questionId: question.id,
+        question,
+        submission,
+        correct: null,
+        feedback: message,
+        feedbackError,
+        timestamp: Date.now(),
+      });
     }
 
     setFeedback(feedbackResult);
-    addResponse({
-      questionId: question.id,
-      question,
-      submission,
-      correct,
-      feedback: message,
-      feedbackError,
-      timestamp: Date.now(),
-    });
-
-    const nextScore = score + (correct ? 1 : 0);
-    setScore(nextScore);
-
-    const isLastQuestion = index + 1 >= questions.length;
-    if (isLastQuestion) {
-      navigate('/summary', { state: { score: nextScore, total: questions.length } });
-      return;
-    }
-
-    setIndex((prev) => prev + 1);
   };
 
   const current = questions[index];
@@ -97,7 +107,7 @@ const SessionPage = () => {
         <div className="sc-shell">
           <section className="sc-card">
             <h2>Preparing your session...</h2>
-            <p className="sc-lead">Please head back to confirmation if this message sticks around.</p>
+            <p className="sc-lead">Head back to the setup screen if this message sticks around.</p>
           </section>
         </div>
       </div>
