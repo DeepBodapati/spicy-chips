@@ -12,6 +12,8 @@ const createInitialState = () => ({
   },
   questions: [],
   responses: [],
+  usedQuestionIds: [],
+  questionHistory: [],
 });
 
 const SessionContext = createContext(null);
@@ -29,6 +31,8 @@ export const SessionProvider = ({ children }) => {
       selectedConcepts: concepts,
       questions: [],
       responses: [],
+      usedQuestionIds: [],
+      questionHistory: [],
     }));
   }, []);
   const setOptions = useCallback((nextOptions) => {
@@ -46,6 +50,16 @@ export const SessionProvider = ({ children }) => {
       ...prev,
       questions,
       responses: [],
+      usedQuestionIds: Array.isArray(questions)
+        ? questions
+            .map((q) => q?.id)
+            .filter(Boolean)
+        : [],
+      questionHistory: Array.isArray(questions)
+        ? questions
+            .map((q) => ({ id: q?.id, prompt: q?.prompt }))
+            .filter((item) => item.id && item.prompt)
+        : [],
     }));
   }, []);
 
@@ -54,6 +68,31 @@ export const SessionProvider = ({ children }) => {
       ...prev,
       selectedConcepts: concepts,
     }));
+  }, []);
+
+  const appendQuestions = useCallback((questions) => {
+    if (!Array.isArray(questions) || !questions.length) {
+      return;
+    }
+
+    setState((prev) => {
+      const existingIds = Array.isArray(prev.usedQuestionIds) ? prev.usedQuestionIds : [];
+      const existingSet = new Set(existingIds);
+      const filtered = questions.filter((q) => q && q.id && !existingSet.has(q.id));
+      if (!filtered.length) {
+        return prev;
+      }
+
+      const mergedIds = [...existingIds, ...filtered.map((q) => q.id)];
+      const updatedHistory = [...prev.questionHistory, ...filtered.map((q) => ({ id: q.id, prompt: q.prompt }))].slice(-30);
+
+      return {
+        ...prev,
+        questions: [...prev.questions, ...filtered],
+        usedQuestionIds: mergedIds,
+        questionHistory: updatedHistory,
+      };
+    });
   }, []);
 
   const setGrade = useCallback((grade) => {
@@ -68,6 +107,9 @@ export const SessionProvider = ({ children }) => {
     setState((prev) => ({
       ...prev,
       responses: [...prev.responses, response],
+      questionHistory: response?.question
+        ? [...prev.questionHistory, { id: response.question.id, prompt: response.question.prompt }].slice(-30)
+        : prev.questionHistory,
     }));
   }, []);
 
@@ -84,14 +126,17 @@ export const SessionProvider = ({ children }) => {
     options: state.options,
     questions: state.questions,
     responses: state.responses,
+    usedQuestionIds: state.usedQuestionIds,
+    questionHistory: state.questionHistory,
     setWorksheet,
     setGrade,
     setOptions,
     setQuestions,
     setSelectedConcepts,
     addResponse,
+    appendQuestions,
     reset,
-  }), [state, setWorksheet, setGrade, setOptions, setQuestions, setSelectedConcepts, addResponse, reset]);
+  }), [state, setWorksheet, setGrade, setOptions, setQuestions, setSelectedConcepts, addResponse, appendQuestions, reset]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 };

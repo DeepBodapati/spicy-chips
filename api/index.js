@@ -9,6 +9,30 @@ import { generateQuestionsWithLLM } from './llmQuestionGenerator.js';
 import { analyzeWorksheet } from './conceptExtractor.js';
 import { evaluateDeterministic } from './answerEvaluator.js';
 import { gradeWithLLM } from './llmJudge.js';
+import { logger } from './logger.js';
+import { telemetry } from './telemetry.js';
+
+const FEEDBACK_CACHE_LIMIT = 200;
+const llmFeedbackCache = new Map();
+
+const buildFeedbackCacheKey = (question = {}, normalizedSubmission = {}) => {
+  const base = question.id || question.prompt || 'unknown-question';
+  const keyPayload = {
+    text: typeof normalizedSubmission.text === 'string' ? normalizedSubmission.text.trim().toLowerCase() : '',
+    numeric: Number.isFinite(normalizedSubmission.numeric) ? normalizedSubmission.numeric : null,
+    parts: normalizedSubmission.parts || {},
+  };
+  return `${base}::${JSON.stringify(keyPayload)}`;
+};
+
+const rememberFeedback = (key, value) => {
+  if (!key) return;
+  if (llmFeedbackCache.size >= FEEDBACK_CACHE_LIMIT) {
+    const firstKey = llmFeedbackCache.keys().next().value;
+    llmFeedbackCache.delete(firstKey);
+  }
+  llmFeedbackCache.set(key, { ...value, cachedAt: Date.now() });
+};
 
 const app = express();
 
@@ -89,7 +113,7 @@ app.post('/analyze', async (req, res) => {
       textAnalysis: analysis.textAnalysis || null,
     });
   } catch (error) {
-    console.error('Worksheet analysis failed', error);
+    logger.error('Worksheet analysis failed', { error: error.message, stack: error.stack });
     res.json({ concepts: ['addition', 'subtraction'], originalName, size, mimeType, grade, note: 'analysis-fallback' });
   }
 });
@@ -112,8 +136,25 @@ app.post('/analyze', async (req, res) => {
  * }
  */
 app.post('/generate', async (req, res) => {
-  const { concepts = [], difficulty = 'same', count = 10, seed, grade = '', analysis = null } = req.body || {};
+  const {
+    concepts = [],
+    difficulty = 'same',
+    count = 10,
+    seed = '',
+    grade = '',
+    analysis = null,
+    history = [],
+  } = req.body || {};
   const conceptList = Array.isArray(concepts) ? concepts : [];
+
+  logger.info('generate:request.received', {
+    concepts: conceptList,
+    difficulty,
+    count,
+    grade,
+    history_size: Array.isArray(history) ? history.length : 0,
+    seed: seed || null,
+  });
 
   try {
     let questions = [];
@@ -126,27 +167,38 @@ app.post('/generate', async (req, res) => {
         count,
         grade,
         analysis,
+        history,
+        seed,
       });
 
       if (Array.isArray(llmQuestions) && llmQuestions.length) {
         questions = llmQuestions;
         source = 'llm';
-        console.info('Question generation: using LLM pathway');
+        source = 'llm';
+        logger.info('generate:llm.success', { concepts: conceptList, difficulty, count: questions.length, grade });
       }
     }
 
     if (!questions.length) {
+      logger.warn('generate:llm.fallback', {
+        concepts: conceptList,
+        difficulty,
+        count,
+        reason: 'llm-empty',
+      });
       questions = generateQuestionSet({ concepts: conceptList, difficulty, count, seed });
       source = 'heuristic';
       if (process.env.OPENAI_API_KEY) {
-        console.warn('Question generation: falling back to heuristic templates');
+        logger.warn('generate:heuristic.used', { concepts: conceptList, difficulty, count });
       }
     }
 
+    telemetry.incrementQuestion(source === 'llm' ? 'llm' : 'heuristic');
     res.json({ questions, source });
   } catch (error) {
-    console.error('Failed to generate questions', error);
+    logger.error('generate:error', { error: error.message, stack: error.stack, concepts: conceptList, difficulty, count, grade });
     const fallbackQuestions = generateQuestionSet({ concepts: conceptList, difficulty, count, seed });
+    telemetry.incrementQuestion('heuristic');
     res.status(200).json({ questions: fallbackQuestions, source: 'heuristic', note: 'generate-fallback' });
   }
 });
@@ -180,6 +232,7 @@ app.post('/feedback', async (req, res) => {
         'Nice work! Keep that streak going.',
       ];
       const feedback = `${positivePhrases[Math.floor(Math.random() * positivePhrases.length)]} Ready for the next one.`;
+      telemetry.incrementJudge('deterministic');
       return res.json({ correct: true, feedback, source: 'deterministic' });
     }
 
@@ -187,15 +240,27 @@ app.post('/feedback', async (req, res) => {
       ? question.hints.filter((hint) => typeof hint === 'string' && hint.trim().length)
       : [];
 
+    const normalizedSubmission = deterministic.normalized || {};
+    const cacheKey = buildFeedbackCacheKey(question, normalizedSubmission);
+
     if (process.env.OPENAI_API_KEY) {
-      const llmResult = await gradeWithLLM({ question, submission: deterministic.normalized, deterministic });
+      const cached = llmFeedbackCache.get(cacheKey);
+      if (cached) {
+        telemetry.incrementJudge('llm_cache');
+        return res.json({ correct: cached.correct, feedback: cached.feedback, source: 'llm-cache' });
+      }
+
+      const llmResult = await gradeWithLLM({ question, submission: normalizedSubmission, deterministic });
       if (llmResult) {
-        if (llmResult.correct) {
-          return res.json({ correct: true, feedback: llmResult.tip || 'Sweet! Nailed it.', source: 'llm' });
-        }
-        if (llmResult.tip) {
-          return res.json({ correct: false, feedback: llmResult.tip, source: 'llm' });
-        }
+        const tip = typeof llmResult.tip === 'string' && llmResult.tip.trim().length
+          ? llmResult.tip.trim()
+          : llmResult.correct
+          ? 'Sweet! Nailed it.'
+          : 'Explain how you approached it, then try again with that strategy.';
+        const llmPayload = { correct: Boolean(llmResult.correct), feedback: tip, source: 'llm' };
+        rememberFeedback(cacheKey, llmPayload);
+        telemetry.incrementJudge('llm');
+        return res.json(llmPayload);
       }
     }
 
@@ -208,7 +273,8 @@ app.post('/feedback', async (req, res) => {
       fallbackFeedback = 'Round first, then estimate—getting close is the goal.';
     } else if (question.type === 'multi_part' && question.answer?.parts) {
       const keys = Object.keys(question.answer.parts || {});
-      const missing = keys.filter((key) => deterministic.normalized.parts[key] === undefined);
+      const submittedParts = normalizedSubmission.parts || {};
+      const missing = keys.filter((key) => submittedParts[key] === undefined);
       fallbackFeedback = missing.length
         ? `Make sure to fill out all parts (${missing.join(', ')}).`
         : 'Compare each rounded value to see which place value changes.';
@@ -216,9 +282,11 @@ app.post('/feedback', async (req, res) => {
       fallbackFeedback = 'Take another look and break the problem into smaller steps.';
     }
 
+    telemetry.incrementJudge('heuristic');
     res.json({ correct: false, feedback: fallbackFeedback, source: 'heuristic' });
   } catch (error) {
-    console.error('Feedback evaluation failed', error);
+    logger.error('feedback:error', { error: error.message, stack: error.stack, questionId: question?.id });
+    telemetry.incrementJudge('error');
     res.status(200).json({ correct: false, feedback: 'We had trouble checking this one. Try again!', source: 'error' });
   }
 });
@@ -240,8 +308,15 @@ app.post('/sign-upload', (req, res) => {
   res.json({ uploadUrl, method: 'POST', fields: {} });
 });
 
+app.get('/metrics', (req, res) => {
+  res.json({
+    status: 'ok',
+    telemetry: telemetry.snapshot(),
+  });
+});
+
 // Default port is 3001 unless overridden by environment
 const port = process.env.PORT || 3001;
 app.listen(port, () => {
-  console.log(`API listening on port ${port}`);
+  logger.info('api.start', { port });
 });

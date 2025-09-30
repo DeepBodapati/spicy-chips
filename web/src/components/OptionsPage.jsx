@@ -18,6 +18,7 @@ const OptionsPage = () => {
     setOptions,
     setSelectedConcepts,
     setQuestions,
+    questionHistory,
   } = useSession();
   const { duration, difficulty } = options;
   const worksheetName = worksheet?.name ?? '';
@@ -56,8 +57,8 @@ const OptionsPage = () => {
     setIsLoading(true);
     setError(null);
 
-    const countByDuration = { 5: 5, 10: 8, 15: 12 };
-    const count = countByDuration[options.duration] ?? 5;
+    const initialBatch = 4;
+    const count = initialBatch;
 
     try {
       const analysisContext = analysis
@@ -82,12 +83,26 @@ const OptionsPage = () => {
           }
         : null;
 
+      const seed = Math.random().toString(36).slice(2);
+      const recentHistory = Array.isArray(questionHistory)
+        ? Array.from(
+            new Set(
+              questionHistory
+                .slice(-12)
+                .map((entry) => entry?.prompt)
+                .filter((prompt) => typeof prompt === 'string' && prompt.trim().length)
+            )
+          )
+        : [];
+
       const { questions = [], source } = await generateQuestions({
         concepts: chosenConcepts,
         difficulty: options.difficulty,
         count,
         grade: worksheet?.grade || '',
         analysis: analysisContext,
+        history: recentHistory,
+        seed,
       });
 
       if (source) {
@@ -147,14 +162,14 @@ const OptionsPage = () => {
           <div style={{ marginTop: '32px' }}>
             <h3>Duration</h3>
             <div className="sc-options-group">
-              {[5, 10, 15].map((min) => (
+              {[0.5, 5, 10, 15].map((min) => (
                 <button
                   key={min}
                   className={`sc-button sc-button--outline ${duration === min ? 'active' : ''}`}
                   onClick={() => handleDurationSelect(min)}
                   type="button"
                 >
-                  {min} min
+                  {min < 1 ? '30 sec' : `${min} min`}
                 </button>
               ))}
             </div>

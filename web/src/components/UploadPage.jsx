@@ -97,44 +97,70 @@ const UploadPage = () => {
         </section>
 
         <section className="sc-card">
-          <h2>Upload a worksheet</h2>
-          <p className="sc-lead">PDFs or images work great. We will keep it local during dev, then ship it to storage in prod.</p>
+          <h2>Get ready to practice</h2>
+          <p className="sc-lead">We’ll look at the worksheet, tag the hot topics, and spin up a session in seconds.</p>
 
-          <div className="sc-field">
-            <label htmlFor="grade-select">Grade level</label>
-            <select
-              id="grade-select"
-              className="sc-input"
-              value={grade}
-              onChange={(event) => setGrade(event.target.value)}
-            >
-              <option value="">Select grade</option>
-              {['K', '1', '2', '3', '4', '5', '6', '7', '8'].map((item) => (
-                <option key={item} value={item}>{item}</option>
-              ))}
-            </select>
-            <span style={{ fontSize: '0.85rem', color: 'var(--sc-muted)' }}>Grade context helps tailor the analysis.</span>
-          </div>
+          <ol className="sc-steps">
+            <li className="sc-step">
+              <div className="sc-step-number">1</div>
+              <div className="sc-step-content">
+                <h3>Pick the learner’s grade</h3>
+                <p className="sc-step-copy">This keeps the questions and hints age-appropriate.</p>
+                <div className="sc-options-group sc-options-group--wrap" role="group" aria-label="Select grade">
+                  {['K', '1', '2', '3', '4', '5', '6', '7', '8'].map((item) => {
+                    const selected = grade === item;
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        className={`sc-button sc-button--outline ${selected ? 'active' : ''}`}
+                        onClick={() => setGrade(selected ? '' : item)}
+                        aria-pressed={selected}
+                      >
+                        {item}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!grade ? (
+                  <p className="sc-step-hint">Choose a grade to unlock uploads.</p>
+                ) : (
+                  <p className="sc-step-hint">Great! We’ll tailor prompts for grade {grade}.</p>
+                )}
+              </div>
+            </li>
 
-          <div className="sc-upload-dropzone">
-            <strong>Select a file to get started</strong>
-            <input type="file" accept="application/pdf,image/*" onChange={handleFileChange} />
-            <span style={{ fontSize: '0.9rem', color: 'var(--sc-muted)' }}>Max 20MB • PDF, PNG, JPG</span>
-          </div>
+            <li className="sc-step">
+              <div className="sc-step-number">2</div>
+              <div className="sc-step-content">
+                <h3>Upload the worksheet</h3>
+                <p className="sc-step-copy">Images or PDFs work. We’ll keep everything local for now.</p>
+                <div className={`sc-upload-dropzone ${!grade ? 'disabled' : ''}`} aria-disabled={!grade}>
+                  <strong>{grade ? 'Select a file to get started' : 'Pick a grade to enable uploads'}</strong>
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    onChange={handleFileChange}
+                    disabled={!grade || isLoading}
+                  />
+                  <span style={{ fontSize: '0.9rem', color: 'var(--sc-muted)' }}>Max 20MB • PDF, PNG, JPG</span>
+                </div>
+                {selectedFile ? (
+                  <p className="sc-step-hint">Ready to scan: <strong>{selectedFile.name}</strong></p>
+                ) : null}
+              </div>
+            </li>
+          </ol>
 
           <div className="sc-controls">
             <button
-              className="sc-button sc-button--primary"
+              className="sc-button sc-button--primary sc-button--primary-lg"
               onClick={handleAnalyze}
               disabled={!selectedFile || !grade || isLoading}
             >
               {isLoading ? 'Analyzing...' : 'Analyze worksheet'}
             </button>
           </div>
-
-          {selectedFile ? (
-            <p className="sc-lead" style={{ marginTop: '16px' }}>Ready to scan: <strong>{selectedFile.name}</strong></p>
-          ) : null}
 
           {error ? <p className="sc-error">{error}</p> : null}
         </section>

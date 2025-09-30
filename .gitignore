@@ -21,3 +21,4 @@ Thumbs.db
 web/dist/
 web/.vite/
 api/uploads/
+api/scripts/samples/

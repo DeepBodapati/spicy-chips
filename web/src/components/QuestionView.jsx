@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
  * It normalizes the answer and forwards it to the parent via `onSubmit`, which
  * may perform grading, feedback lookups, or navigation.
  */
-const QuestionView = ({ q, onSubmit }) => {
+const QuestionView = ({ q, onSubmit, disabled = false }) => {
   const [value, setValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
@@ -22,6 +22,12 @@ const QuestionView = ({ q, onSubmit }) => {
     setTipVisible(false);
     setSubmitError(null);
   }, [q?.id]);
+
+  useEffect(() => {
+    if (disabled) {
+      setTipVisible(false);
+    }
+  }, [disabled]);
 
   if (!q) {
     return null;
@@ -79,6 +85,10 @@ const QuestionView = ({ q, onSubmit }) => {
     }
 
     const submission = buildSubmission();
+    if (disabled) {
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -111,7 +121,7 @@ const QuestionView = ({ q, onSubmit }) => {
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder="Type your response"
-          disabled={isSubmitting}
+          disabled={isSubmitting || disabled}
         />
       </div>
       <div className="sc-controls">
@@ -119,18 +129,22 @@ const QuestionView = ({ q, onSubmit }) => {
           type="button"
           className="sc-button sc-button--outline sc-button--small"
           onClick={handleToggleTip}
-          disabled={!hints.length || isSubmitting}
+          disabled={!hints.length || isSubmitting || disabled}
         >
           {tipVisible ? 'Hide tip' : 'Show tip'}
         </button>
-        <button className="sc-button sc-button--primary" onClick={handleSubmit} disabled={isSubmitting}>
+        <button className="sc-button sc-button--primary" onClick={handleSubmit} disabled={isSubmitting || disabled}>
           {isSubmitting ? 'Checking...' : 'Submit'}
         </button>
       </div>
       {tipVisible && hints.length ? (
         <div className="sc-tip">
           <strong>Try this:</strong>
-          <p style={{ margin: '6px 0 0' }}>{hints[0]}</p>
+          <ul className="sc-tip-list">
+            {hints.map((hint, idx) => (
+              <li key={`${q.id}-hint-${idx}`}>{hint}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
       {submitError ? <p className="sc-error">{submitError}</p> : null}
